@@ -19,6 +19,7 @@
 #include "FWCore/ServiceRegistry/interface/Service.h"
 #include "CommonTools/UtilAlgos/interface/TFileService.h"
 #include "DataFormats/Common/interface/Ref.h"
+#include <string>
 
 //for root histogramming
 #include "TH1.h"
@@ -55,6 +56,11 @@
 #include "DataFormats/JetReco/interface/PFJet.h"
 #include "DataFormats/JetReco/interface/PFJetCollection.h"
 
+//for HLTrigger
+#include "DataFormats/Common/interface/TriggerResults.h"
+#include "FWCore/Common/interface/TriggerNames.h"
+#include "PhysicsTools/PatUtils/interface/TriggerHelper.h"
+
 //class declaration
 
 class DemoAnalyzer: public edm::EDAnalyzer 
@@ -73,12 +79,30 @@ class DemoAnalyzer: public edm::EDAnalyzer
 	TTree *mytree ;
 
 	//declare variables
-	int eventno, nparticles, type[3000] , njets;
-//	double px[3000], py[3000], pz[3000] ;
-	double pt[3000], eta[3000], phi[3000], et[3000] ;
-	double j_pt[3000], j_eta[3000], j_phi[3000], j_et[3000] ;
-	int nvertex ;
-	double x[50], y[50], z[50] ;
+	int 	eventno,	nparticles,	type[3000],	njets,		nvertex,	charge[3000] ;
+	double 	px[3000],	py[3000],	pz[3000]	;
+	double 	pt[3000],	eta[3000],	phi[3000],	e[3000] ;
+	double  j_pt[3000],	j_eta[3000],	j_phi[3000],	j_e[3000] ;
+	double  x[50],		y[50],		z[50] ;
+
+	//variable for HLTrigger
+//	#define N_TRIGGER_BOOKINGS 5788
+	int trgBook[9] ;
+	int trgCount ;	
+	int n_trg ;
+
+	const std::string TriggerBooking[9] = {
+	"HLT_Mu13_Mu8_v17",	//000
+	"HLT_Mu17_Mu8_v17",	//001
+	"HLT_Mu5_v18",		//002
+	"HLT_Mu8_v16",		//003
+	"HLT_Mu12_v16",		//004
+	"HLT_Mu17_v3",		//005
+	"HLT_Mu24_v14",		//006
+	"HLT_Mu30_v14",		//007
+	"HLT_Mu40_v12"		//008
+	} ;
+
 };
 
 
@@ -89,6 +113,7 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig)
 
 	//intialize the varibles
 	eventno = 9999 ; nparticles = 9999 ; nvertex = 9999 ; njets = 9999 ; 
+
 }
 
 
@@ -133,6 +158,73 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	Handle<reco::PFJetCollection>  jets ;
 	iEvent.getByLabel( "ak5PFJets" , jets ) ;
 
+
+	//HLT
+	edm::Handle<TriggerResults> TrgResultsHandle ; //catch triggerresults
+	const pat::helper::TriggerMatchHelper matchHelper ;
+
+	edm::InputTag trigResultsTag( "TriggerResults" , "" , "HLT" ) ;
+	bool with_TriggerResults = iEvent.getByLabel( trigResultsTag , TrgResultsHandle ) ;
+	if ( !with_TriggerResults )
+	{
+		std::cout << "Sorry there is no TriggerResult in the file" << std::endl ; 
+	}
+	else
+	{
+		//get the names of the triggers
+		const edm::TriggerNames &TrgNames = iEvent.triggerNames( *TrgResultsHandle ) ;
+		trgCount = 0 ;
+		n_trg = TrgNames.size() ;
+
+		//Check the trigger list in the event
+//		for ( unsigned k = 0 ; k < 440 ; k++ )
+//		{
+//			cout << TrgNames.triggerNames()[k] << endl ;
+//		}
+		for ( int i = 0 ; i < 9 ; i++ )
+		{
+			unsigned int TrgIndex = TrgNames.triggerIndex( TriggerBooking[i] ) ;
+//			cout << "i = " <<  i << endl ;
+//			cout << "TriggerBooking[i] = " << TriggerBooking[i] << endl ;
+//			cout << "TrgNames.size() = " << TrgNames.size()  << endl ;
+//			cout << "TrgIndex 	 = " << TrgIndex << endl ;
+
+			if ( TrgIndex == TrgNames.size() )
+			{
+				trgBook[i] = -4 ; // The trigger path is not known in this event.
+			}
+			else if ( !TrgResultsHandle -> wasrun( TrgIndex ) )
+			{
+				trgBook[i] = -3 ; // The trigger path was not included in this event.
+			}
+			else if ( !TrgResultsHandle -> accept( TrgIndex ) )
+			{
+				trgBook[i] = -2 ; // The trigger path was not accepted in this event.
+			}
+			else if (  TrgResultsHandle -> error ( TrgIndex ) )
+			{
+				trgBook[i] = -1 ; // The trigger path has an error in this event.
+			}
+			else
+			{
+				trgBook[i] = +1 ; // It's triggered.
+				trgCount++ ;
+			}
+		}
+		//save all trigger
+//		EvtInfo.nHLT = TrgNames.size() ;
+//		for ( unsigned int i = 0 ; i < TrgNames.size() ; i++ )
+//		{
+//			EvtInfo.hltBits[i] = ( TrgResultsHandle -> accept(i) == true ) ? 1:0 ;
+//		}
+	}//end(!with_TriggerResults)
+
+
+
+
+
+
+
 	//initialze the counting variables
 	int c = 0 ;
 	int jc = 0 ;
@@ -167,13 +259,15 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	for (reco::PFCandidateCollection::const_iterator it = particles -> begin() ; it != particles -> end() ; it++ )
 	{ 			
 		type[c] = it -> particleId() ;
-//		px[c]  = it -> px() ;
-//		py[c]  = it -> py() ;
-//		pz[c]  = it -> pz() ;
+		px[c]  = it -> px() ; 
+		py[c]  = it -> py() ;
+		pz[c]  = it -> pz() ;
 		pt[c]  = it -> pt() ;
 		eta[c] = it -> eta() ;
 		phi[c] = it -> phi() ;
-		et[c]  = it -> et() ;
+		e[c]  = it -> energy() ;
+		charge[c] = it -> charge() ;
+
 		c++ ;
 	}
 	
@@ -182,13 +276,15 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 		j_pt[jc]  = it -> pt() ;
 		j_eta[jc] = it -> eta() ;
 		j_phi[jc] = it -> phi() ;
-		j_et[jc]  = it -> et() ;
+		j_e[jc]  = it -> energy() ;
+
 		jc++ ;
 	}
+
+
 	mytree -> Fill() ;	
+
 }
-
-
 
 void DemoAnalyzer::beginJob()
 {
@@ -198,13 +294,14 @@ void DemoAnalyzer::beginJob()
 	mytree -> Branch ( "eventno" , &eventno , "eventno/I" ) ;
 	mytree -> Branch ( "nparticles" , &nparticles , "nparticles/I" ) ;
 	mytree -> Branch ( "type" , type , "type[nparticles]/I" ) ;
-//	mytree -> Branch ( "px" , px , "px[nparticles]/D" ) ;
-//	mytree -> Branch ( "py" , py , "py[nparticles]/D" ) ;
-//	mytree -> Branch ( "pz" , pz , "pz[nparticles]/D" ) ;
+	mytree -> Branch ( "px" , px , "px[nparticles]/D" ) ;
+	mytree -> Branch ( "py" , py , "py[nparticles]/D" ) ;
+	mytree -> Branch ( "pz" , pz , "pz[nparticles]/D" ) ;
 	mytree -> Branch ( "pt" , pt , "pt[nparticles]/D" ) ;
 	mytree -> Branch ( "eta" , eta , "eta[nparticles]/D" ) ;
 	mytree -> Branch ( "phi" , phi , "phi[nparticles]/D" ) ;
-	mytree -> Branch ( "et" , et , "et[nparticles]/D" ) ;
+	mytree -> Branch ( "e" , e , "e[nparticles]/D" ) ;
+	mytree -> Branch ( "charge" , charge , "charge[nparticles]/I" ) ;
 	
 	mytree -> Branch ( "nvertex" , &nvertex , "nvertex/I" ) ;
 	mytree -> Branch ( "x" , x , "x[nvertex]/D" ) ;
@@ -212,12 +309,15 @@ void DemoAnalyzer::beginJob()
 	mytree -> Branch ( "z" , z , "z[nvertex]/D" ) ; 
 
 	mytree -> Branch ( "njets" , &njets , "njets/I" ) ;
-
 	mytree -> Branch ( "j_pt" , j_pt , "j_pt[njets]/D" ) ;
 	mytree -> Branch ( "j_eta" , j_eta , "j_eta[njets]/D" ) ;
 	mytree -> Branch ( "j_phi" , j_phi , "j_phi[njets]/D" ) ;
-	mytree -> Branch ( "j_et" , j_et , "j_et[njets]/D" ) ;
+	mytree -> Branch ( "j_e" , j_e , "j_e[njets]/D" ) ;
+
+	mytree -> Branch ( "trgBook" , trgBook , "trgBook[9]/I" ) ;
+	mytree -> Branch ( "n_trg" , &n_trg , " n_trg/I" ) ;
 }
+
 
 void DemoAnalyzer::endJob()
 {
